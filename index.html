@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok Video Downloader - Without Watermark</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:#f6f6f9;color:#161823}
+  .wrap{max-width:680px;margin:40px auto;padding:0 16px}
+  .card{background:#fff;border:1px solid #ececf3;border-radius:20px;box-shadow:0 10px 30px rgba(22,24,35,.08);padding:24px}
+  h1{font-size:24px;margin:0 0 6px;text-align:center}
+  .sub{color:#6b7280;text-align:center;margin:0 0 20px;font-size:14px}
+  .row{display:flex;gap:10px}
+  input{flex:1;min-width:0;padding:15px 16px;border:2px solid #ececf3;border-radius:12px;font-size:16px;outline:none}
+  input:focus{border-color:#fe2c55}
+  button.go{background:#fe2c55;color:#fff;border:none;padding:15px 26px;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;white-space:nowrap}
+  button.go:disabled{opacity:.55;cursor:not-allowed}
+  .hint{color:#6b7280;font-size:13px;text-align:center;margin:12px 0 0}
+  #result{margin-top:18px}
+  .loading{text-align:center;color:#6b7280;font-weight:600;padding:10px}
+  .error{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:14px 16px;border-radius:12px;font-weight:600}
+  .video{display:flex;gap:18px;align-items:flex-start}
+  .video img{width:140px;height:186px;object-fit:cover;border-radius:12px;background:#f7f7fb}
+  .info{flex:1;min-width:0}
+  .info h3{margin:0 0 4px;font-size:16px}
+  .info p{color:#6b7280;font-size:14px;margin:0 0 14px;word-break:break-word}
+  a.dl,button.dl{display:flex;justify-content:center;width:100%;padding:13px;margin-bottom:10px;background:#16a34a;color:#fff;text-decoration:none;border:none;border-radius:12px;font-weight:700;font-size:16px;cursor:pointer;font-family:inherit}
+  a.dl.alt,button.dl.alt{background:#fff;color:#161823;border:2px solid #ececf3}
+  a.dl.alt:hover,button.dl.alt:hover{background:#111;color:#fff}
+  button.again{display:block;width:100%;padding:11px;background:#fff;border:2px solid #ececf3;border-radius:12px;font-weight:700;cursor:pointer}
+  @media(max-width:560px){.row{flex-direction:column}.video{flex-direction:column;align-items:center;text-align:center}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>TikTok Video Downloader</h1>
+    <p class="sub">Download TikTok videos without watermark, free. No app, no login.</p>
+    <div class="row">
+      <input type="text" id="url" placeholder="Paste TikTok link here..." autocomplete="off">
+      <button class="go" id="go">Download</button>
+    </div>
+    <p class="hint">Example: https://www.tiktok.com/@user/video/1234567890</p>
+    <div id="result"></div>
+  </div>
+</div>
+<script>
+(function(){
+  var input=document.getElementById('url'), btn=document.getElementById('go'), out=document.getElementById('result');
+  function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function err(m){out.innerHTML='<div class="error">'+esc(m)+'</div>';}
+  async function run(){
+    var link=input.value.trim();
+    if(!link){err('Please paste a TikTok link first.');input.focus();return;}
+    btn.disabled=true;btn.textContent='Processing...';
+    out.innerHTML='<div class="loading">Fetching your video, please wait... (the first request may take a little longer while the server wakes up)</div>';
+    try{
+      var res=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:link})});
+      var data=await res.json();
+      if(!data.success){err(data.message||'Something went wrong. Please try again.');}
+      else{
+        var html='<div class="video">';
+        if(data.thumbnail) html+='<img src="'+esc(data.thumbnail)+'" alt="Video thumbnail">';
+        html+='<div class="info"><h3>Your video is ready</h3><p>'+esc(data.title||'')+(data.author?' — @'+esc(data.author):'')+'</p>';
+        (data.qualities||[]).forEach(function(q){ html+='<a class="dl" href="'+esc(q.url)+'" target="_blank" rel="noopener" download>Download '+esc(q.height?q.height+'p':'Video')+' (No Watermark)</a>'; });
+        if(data.thumbnail) html+='<a class="dl alt" href="'+esc(data.thumbnail)+'" target="_blank" rel="noopener" download>Download Thumbnail</a>';
+        html+='<button class="dl alt" id="mp3">Download Audio (MP3)</button><div id="mp3msg"></div>';
+        html+='<button class="again" id="again">Download Another Video</button></div></div>';
+        out.innerHTML=html;
+        document.getElementById('again').addEventListener('click',function(){input.value='';out.innerHTML='';input.focus();});
+        document.getElementById('mp3').addEventListener('click',async function(){
+          var b=this,m=document.getElementById('mp3msg');b.disabled=true;b.textContent='Preparing MP3... please wait';
+          try{
+            var r=await fetch('/api/audio?url='+encodeURIComponent(link)); var d=await r.json();
+            if(d.success){var a=document.createElement('a');a.href=d.downloadUrl;a.download='tiktok-audio.mp3';document.body.appendChild(a);a.click();a.remove();m.innerHTML='<p style="color:#16a34a;font-weight:600">Your MP3 download has started.</p>';}
+            else m.innerHTML='<p style="color:#b91c1c;font-weight:600">'+esc(d.message||'Audio failed.')+'</p>';
+          }catch(e){m.innerHTML='<p style="color:#b91c1c;font-weight:600">Audio failed. Please try again.</p>';}
+          b.disabled=false;b.textContent='Download Audio (MP3)';
+        });
+      }
+    }catch(e){err('Something went wrong. Please try again.');}
+    btn.disabled=false;btn.textContent='Download';
+  }
+  btn.addEventListener('click',run);
+  input.addEventListener('keydown',function(e){if(e.key==='Enter')run();});
+})();
+</script>
+</body>
+</html>

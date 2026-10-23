@@ -1,0 +1,1 @@
+{"dependencies":{"express":"^4.19.2","ffmpeg-static":"^5.2.0"},"description":"Free TikTok video downloader microservice (no watermark) - yt-dlp primary, TikWM fallback, MP3 via ffmpeg","engines":{"node":">=18"},"main":"server.js","name":"tiktok-downloader-service","scripts":{"fetch-ytdlp":"node scripts/fetch-ytdlp.js","start":"node server.js"},"version":"1.0.0"}
