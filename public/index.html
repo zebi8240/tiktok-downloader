@@ -29,6 +29,10 @@
   a.dl.alt,button.dl.alt{background:#fff;color:#161823;border:2px solid #ececf3}
   a.dl.alt:hover,button.dl.alt:hover{background:#111;color:#fff}
   button.again{display:block;width:100%;padding:11px;background:#fff;border:2px solid #ececf3;border-radius:12px;font-weight:700;cursor:pointer}
+  .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;width:100%}
+  .photo{border:1px solid #ececf3;border-radius:12px;overflow:hidden;background:#fff}
+  .photo img{width:100%;height:180px;object-fit:cover;display:block;background:#f7f7fb}
+  .photo a.dl{margin:0;border-radius:0;padding:10px;font-size:14px}
   @media(max-width:560px){.row{flex-direction:column}.video{flex-direction:column;align-items:center;text-align:center}}
 </style>
 </head>
@@ -60,13 +64,19 @@
       var data=await res.json();
       if(!data.success){err(data.message||'Something went wrong. Please try again.');}
       else{
+        var isPhoto = data.type==='photo' && data.images && data.images.length;
         var html='<div class="video">';
-        if(data.thumbnail) html+='<img src="'+esc(data.thumbnail)+'" alt="Video thumbnail">';
-        html+='<div class="info"><h3>Your video is ready</h3><p>'+esc(data.title||'')+(data.author?' — @'+esc(data.author):'')+'</p>';
+        if(!isPhoto && data.thumbnail) html+='<img src="'+esc(data.thumbnail)+'" alt="Video thumbnail">';
+        html+='<div class="info"><h3>'+(isPhoto?'Your photos are ready':'Your video is ready')+'</h3><p>'+esc(data.title||'')+(data.author?' — @'+esc(data.author):'')+'</p>';
         (data.qualities||[]).forEach(function(q){ html+='<a class="dl" href="'+esc(q.url)+'" target="_blank" rel="noopener" download>Download '+esc(q.height?q.height+'p':'Video')+' (No Watermark)</a>'; });
-        if(data.thumbnail) html+='<a class="dl alt" href="'+esc(data.thumbnail)+'" target="_blank" rel="noopener" download>Download Thumbnail</a>';
+        if(isPhoto){
+          html+='<div class="photos">';
+          data.images.forEach(function(im,i){ html+='<div class="photo"><img src="'+esc(im)+'" alt="Photo '+(i+1)+'"><a class="dl" href="'+esc(im)+'" target="_blank" rel="noopener" download>Download Photo '+(i+1)+'</a></div>'; });
+          html+='</div><p style="margin-top:10px">This post has '+data.images.length+' photos. Tap each button to save it in full quality.</p>';
+        }
+        if(!isPhoto && data.thumbnail) html+='<a class="dl alt" href="'+esc(data.thumbnail)+'" target="_blank" rel="noopener" download>Download Thumbnail</a>';
         html+='<button class="dl alt" id="mp3">Download Audio (MP3)</button><div id="mp3msg"></div>';
-        html+='<button class="again" id="again">Download Another Video</button></div></div>';
+        html+='<button class="again" id="again">'+(isPhoto?'Download Another Post':'Download Another Video')+'</button></div></div>';
         out.innerHTML=html;
         document.getElementById('again').addEventListener('click',function(){input.value='';out.innerHTML='';input.focus();});
         document.getElementById('mp3').addEventListener('click',async function(){
