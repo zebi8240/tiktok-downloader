@@ -82,40 +82,81 @@ function updateYtDlp() {
 }
 
 /* ================================================================
-   Fallback: TikWM free API (koi key nahi, koi account nahi)
+   Primary: TikWM free API (koi key nahi, koi account nahi)
    play / hdplay = no watermark, wmplay = watermark, music, cover
+   Photo slideshow post par "images" array ata hai (har photo ka
+   alag direct link) — ye photos hasil karne ka wahid tareeqa hai,
+   yt-dlp /photo/ URLs ko support hi nahi karta (verify shuda).
+   Headers bilkul browser jese rakhe hain, warna kuch servers
+   (Cloudflare) aam API request ko rok dete hain. 2 hosts bari
+   bari try hote hain.
    ================================================================ */
-function fetchWithTikWm(url) {
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Referer': 'https://www.tiktok.com/',
+};
+
+function tikwmRequest(host, url) {
   return new Promise((resolve, reject) => {
-    const api = 'https://www.tikwm.com/api/?hd=1&url=' + encodeURIComponent(url);
-    https.get(api, { headers: { 'User-Agent': 'tiktok-downloader-service' }, timeout: 30000 }, (resp) => {
+    const api = `https://${host}/api/?hd=1&url=` + encodeURIComponent(url);
+    https.get(api, { headers: BROWSER_HEADERS, timeout: 30000 }, (resp) => {
       let body = '';
       resp.on('data', (d) => { body += d; });
       resp.on('end', () => {
         try {
           const j = JSON.parse(body);
-          if (!j || j.code !== 0 || !j.data) return reject(new Error('tikwm failed'));
-          const d = j.data;
-          const qualities = [];
-          if (d.hdplay) qualities.push({ label: 'Download Video HD (No Watermark)', url: d.hdplay, height: null });
-          if (d.play && d.play !== d.hdplay) qualities.push({ label: 'Download Video (No Watermark)', url: d.play, height: null });
-          if (!qualities.length) return reject(new Error('tikwm: no video'));
-          resolve({
-            success: true,
-            source: 'tikwm',
-            title: d.title || '',
-            author: (d.author && (d.author.unique_id || d.author.nickname)) || '',
-            thumbnail: d.cover || d.origin_cover || '',
-            duration: d.duration || null,
-            videoUrl: qualities[0].url,
-            qualities,
-            watermarkUrl: d.wmplay || null,
-            musicUrl: d.music || null,
-          });
-        } catch (e) { reject(new Error('tikwm bad output')); }
+          if (!j || j.code !== 0 || !j.data) return reject(new Error('tikwm failed on ' + host));
+          resolve(j.data);
+        } catch (e) { reject(new Error('tikwm bad output on ' + host)); }
       });
-    }).on('error', () => reject(new Error('tikwm unreachable')));
+    }).on('error', () => reject(new Error('tikwm unreachable: ' + host)));
   });
+}
+
+async function fetchWithTikWm(url) {
+  let d = null;
+  let lastErr = null;
+  for (const host of ['www.tikwm.com', 'tikwm.com']) {
+    try { d = await tikwmRequest(host, url); break; } catch (e) { lastErr = e; }
+  }
+  if (!d) throw lastErr || new Error('tikwm failed');
+
+  const base = {
+    success: true,
+    source: 'tikwm',
+    title: d.title || '',
+    author: (d.author && (d.author.unique_id || d.author.nickname)) || '',
+    thumbnail: d.cover || d.origin_cover || '',
+    musicUrl: d.music || null,
+  };
+
+  // ---- Photo slideshow post ----
+  if (Array.isArray(d.images) && d.images.length) {
+    return {
+      ...base,
+      type: 'photo',
+      duration: null,
+      images: d.images,
+      videoUrl: null,
+      qualities: [],
+      watermarkUrl: null,
+    };
+  }
+
+  // ---- Aam video post ----
+  const qualities = [];
+  if (d.hdplay) qualities.push({ label: 'Download Video HD (No Watermark)', url: d.hdplay, height: null });
+  if (d.play && d.play !== d.hdplay) qualities.push({ label: 'Download Video (No Watermark)', url: d.play, height: null });
+  if (!qualities.length) throw new Error('tikwm: no video');
+  return {
+    ...base,
+    type: 'video',
+    duration: d.duration || null,
+    videoUrl: qualities[0].url,
+    qualities,
+    watermarkUrl: d.wmplay || null,
+  };
 }
 
 /* ================================================================
@@ -152,6 +193,7 @@ function fetchByDownloadingFile(url, req) {
       resolve({
         success: true,
         source: 'yt-dlp-file',
+        type: 'video',
         title: info.title || '',
         author: info.uploader || info.channel || '',
         thumbnail: info.thumbnail || '',
@@ -177,12 +219,16 @@ async function handleDownload(req, res) {
   } catch (e1) {
     console.error('[download] tikwm failed, trying yt-dlp file mode:', e1.message);
   }
-  // 2) Fallback: yt-dlp khud download kar ke file dega
+  // 2) Fallback: yt-dlp khud download kar ke file dega (sirf video posts ke liye;
+  //    photo posts ko yt-dlp support nahi karta, un ka wahid rasta TikWM hai)
   try {
     const data = await fetchByDownloadingFile(url, req);
     return res.json(data);
   } catch (e2) {
     console.error('[download] yt-dlp file mode failed:', e2.message);
+    if (/\/photo\//i.test(url)) {
+      return res.status(500).json({ success: false, message: 'Could not fetch this photo post right now. Please try again in a little while.' });
+    }
     return res.status(500).json({ success: false, message: 'Could not fetch this video. The link may be private or removed, please try another one.' });
   }
 }
@@ -200,6 +246,9 @@ function handleAudio(req, res) {
   if (!fs.existsSync(YTDLP)) {
     return res.status(500).json({ success: false, message: 'Audio engine not installed yet. Try again in a minute.' });
   }
+  // Photo post ki music ke liye: yt-dlp /photo/ URL nahi parhta,
+  // lekin usi post ka /video/ wala pata us ki audio de deta hai (verify shuda)
+  const ytdlpUrl = url.replace('/photo/', '/video/');
   const id = crypto.randomBytes(8).toString('hex');
   const outTemplate = path.join(FILES_DIR, `${id}.%(ext)s`);
   const args = [
@@ -207,7 +256,7 @@ function handleAudio(req, res) {
     '--ffmpeg-location', ffmpegPath,
     '--no-playlist',
     '-o', outTemplate,
-    url,
+    ytdlpUrl,
   ];
   const child = spawn(YTDLP, args, { timeout: 180000 });
   let errOut = '';
